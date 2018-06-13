@@ -1,0 +1,601 @@
+#!/bin/bash
+# https://www.htpcguides.com/
+
+
+do_admin() {
+	## Torrent root directory
+	INTERFACE="tun0" ## dont change
+	MYUSER=`awk -F'[/:]' '{if ($3 >= 1000 && $3 != 65534) print $1}' /etc/passwd  |head -n1`
+	HOMEDIR=$( getent passwd "$MYUSER" | cut -d: -f6 )
+	if [[ "$HOMEDIR" = *"root"* ]]; then
+	  echo "Run the script as a normal user!"
+	  exit 1
+	fi
+	
+	SCRIPTDIR="$HOMEDIR""/scripts"
+	EXPORTDIR="$HOMEDIR""/exports"
+	TORROOT="$HOMEDIR""/torrents"
+	mkdir -p "$SCRIPTDIR" "$EXPORTDIR" "$TORROOT"
+	
+	#touch "$EXPORTDIR""/PIA.txt"
+	
+	clear
+	if [ ! -e "$EXPORTDIR""/PIA.txt" ] && [ ! -e "/etc/openvpn/login.txt" ];then
+		HAPPY="n"
+		while [[ ! $HAPPY =~ ^[Yy]$ ]]  
+		do
+			clear
+			echo "Important: if you are using special characters in your PIA password, then put the password inside quotation marks, like “piapass”"
+			read -p "Enter PIA Username: " PIA_USERNAME
+			read -p "Enter PIA Password: " PIA_PASSWORD
+			echo "You entered u:$PIA_USERNAME p:$PIA_PASSWORD"
+			read -p "Are you happy with these? " HAPPY
+		done
+## Delete
+		PIA_USERNAME="username"
+		PIA_PASSWORD="password"
+##
+		echo "$PIA_USERNAME" > "$EXPORTDIR""/PIA.txt"
+		echo "$PIA_PASSWORD" >> "$EXPORTDIR""/PIA.txt"
+		sudo chmod 600 "$EXPORTDIR""/PIA.txt"
+	fi
+
+	if [ ! -e "$EXPORTDIR""/VPNUSER" ];then
+		clear
+		HAPPY="n"
+		while [[ ! $HAPPY =~ ^[Yy]$ ]]  
+		do
+			clear
+			read -p "Enter name of vpn user: " VPNUSER
+			echo "You entered vpn user: $VPNUSER"
+			read -p "Are you happy with this? " HAPPY
+		done
+		echo "$VPNUSER" > "$EXPORTDIR""/VPNUSER"		
+	else
+	#https://ss64.com/bash/chmod.html
+	chmod 444 "$EXPORTDIR""/VPNUSER"
+	VPNUSER=`cat "$EXPORTDIR""/VPNUSER"`
+	
+## Delete	
+	VPNUSER="ispy" ## lowercase
+##
+	chown -R "#VPNUSER":"$VPNUSER" "$TORROOT"
+	chmod -R 777 "$TORROOT"
+	fi
+	
+	ETH=`ip -o link show | awk '{print $2,$9}' |grep UP | sed -e 's/:.*//'`
+	DELUGE="deluge-1.3.15" 	#Current version at http://download.deluge-torrent.org/source/?C=M;O=D
+	PROGRESS="$HOMEDIR""/progress"
+}
+
+do_aptUpdate() {
+	if [ -e "$PROGRESS"$1 ];then
+		return 0
+	fi
+	apt update && apt upgrade -y
+	if [ $? -eq 0 ]; then
+        touch "$PROGRESS"$1
+	fi
+	clear
+	echo "System will now reboot. ssh in again and restart script. This is normal."; sleep 10
+	reboot
+}
+
+do_proxy() {
+	if [ -e "$PROGRESS"$1 ];then
+		return 0
+	fi
+	clear
+	## Code needed
+	read -p "Do you want to use a proxy for installs: " PROXY
+	touch /etc/apt/apt.conf.d/02proxy
+	
+cat <<EOF > /etc/apt/apt.conf.d/02proxy
+Acquire::http::Proxy "http://10.0.5.1:3142";
+APT::Install-Recommends "0";
+APT::Install-Suggests "0";
+EOF
+
+	if [ $? -eq 0 ]; then
+        touch "$PROGRESS"$1
+	fi
+	
+}
+
+do_apt() {
+	if [ -e "$PROGRESS"$1 ];then
+		return 0
+	fi
+	
+	apt install net-tools build-essential \
+	locate nano sudo iptables curl resolvconf unzip nmap -y
+	if [ $? -eq 0 ]; then
+        touch "$PROGRESS"$1
+	fi
+	
+	clear
+	echo "System will now reboot. ssh in again and restart script. This is normal."; sleep 10
+	reboot
+}
+
+do_stuff() {
+	if [ -e "$PROGRESS"$1 ];then
+		return 0
+	fi
+
+	cd "$SCRIPTDIR"
+	curl -L "https://drive.google.com/uc?export=download&id=14nxMeL6S-oh_Wq-CeopAaADBy2JXHnrz" |tar xvz
+	chmod +x bigBrother
+	set +e
+	crontab -l > /tmp/sucron
+	echo "@reboot sleep 300; $SCRIPTDIR/bigBrother resNET > /dev/null 2>&1" >> /tmp/sucron
+	echo "*/1 * * * * /bin/bash $SCRIPTDIR/bigBrother chnIPT > /dev/null 2>&1" >> /tmp/sucron
+	echo "*/30 * * * * /bin/bash $SCRIPTDIR/bigBrother chkVPN > /dev/null 2>&1" >> /tmp/sucron
+	crontab /tmp/sucron
+	rm /tmp/sucron
+
+	crontab -l -u "$VPNUSER" > /tmp/vpncron
+	echo "*/1 * * * * /bin/bash $SCRIPTDIR/bigBrother getNFP > /dev/null 2>&1" >> /tmp/vpncron
+	echo "*/15 6-23 * * * /bin/bash $SCRIPTDIR/bigBrother popDWF > /dev/null 2>&1" >> /tmp/vpncron
+	crontab -u "$VPNUSER" /tmp/vpncron
+	rm /tmp/vpncron
+	set -e
+
+	if [ $? -eq 0 ]; then
+        touch "$PROGRESS"$1
+	fi
+}
+
+do_install_deluge() {
+	if [ -e "$PROGRESS"$1 ];then
+		return 0
+	fi
+
+	apt install	python python-twisted python-openssl python-setuptools intltool \
+	python-xdg python-chardet python-libtorrent python-mako \
+	python-pip python-dev git-core -y
+	
+	cd /tmp
+	wget -N http://download.deluge-torrent.org/source/"$DELUGE".tar.bz2
+	tar xvf "$DELUGE".tar.bz2
+	mkdir -p /var/log/deluge
+	chown -R "$VPNUSER":"$VPNUSER" /var/log/deluge
+	chmod -R 770 /var/log/deluge
+touch /etc/logrotate.d/deluge
+cat <<EOF > /etc/logrotate.d/deluge
+/var/log/deluge/*.log {
+        rotate 4
+        weekly
+        missingok
+        notifempty
+        compress
+        delaycompress
+        sharedscripts
+        postrotate
+                initctl restart deluged >/dev/null 2>&1 || true
+                initctl restart deluge-web >/dev/null 2>&1 || true
+        endscript
+}
+EOF
+
+	echo "Build deluge"
+	cd "$DELUGE"
+	python setup.py build
+	python setup.py install --install-layout=deb
+	python setup.py install_data
+	
+touch /etc/systemd/system/deluged.service
+cat <<EOF > /etc/systemd/system/deluged.service
+[Unit]
+Description=Deluge Bittorrent Client Daemon
+After=network-online.target sys-devices-virtual-net-tun0.device
+Wants=sys-devices-virtual-net-tun0.device
+
+[Service]
+Type=simple
+User=$VPNUSER
+Group=$VPNUSER
+UMask=007
+
+ExecStart=/usr/bin/deluged -d -l /var/log/deluge/daemon.log -L warning
+
+Restart=on-failure
+# Configures the time to wait before service is stopped forcefully.
+TimeoutStopSec=300
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+touch /etc/systemd/system/deluge-web.service
+cat <<EOF > /etc/systemd/system/deluge-web.service
+[Unit]
+Description=Deluge Bittorrent Client Web Interface
+After=network-online.target sys-devices-virtual-net-tun0.device
+Wants=sys-devices-virtual-net-tun0.device
+
+[Service]
+Type=simple
+User=$VPNUSER
+Group=$VPNUSER
+UMask=027
+
+ExecStart=/usr/bin/deluge-web -l /var/log/deluge/web.log -L info
+
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+	if [ $? -eq 0 ]; then
+        touch "$PROGRESS"$1
+	fi
+}
+
+do_install_openvpn() {
+	if [ -e "$PROGRESS"$1 ];then
+		return 0
+	fi
+	#echo "Stopping services..."
+	#systemctl stop deluge-web.service
+	#systemctl stop deluged.service	
+	#systemctl stop openvpn@openvpn.service
+	sleep 10
+	apt install libssl-dev liblzo2-dev libpam0g-dev -y
+	cd /tmp
+	wget -N http://build.openvpn.net/downloads/releases/latest/openvpn-latest-stable.tar.gz
+	wget -N https://www.privateinternetaccess.com/openvpn/openvpn.zip
+	unzip openvpn.zip
+	OVPN=`tar --list -f openvpn-latest-stable.tar.gz |head -n1`
+	tar xf openvpn-latest-stable.tar.gz
+	cd "$OVPN"
+	
+	./configure --prefix=/usr
+	make
+	make install
+	mkdir -p /run/openvpn/ /etc/openvpn/
+	cd /tmp/
+	cp crl.rsa.2048.pem ca.rsa.2048.crt /etc/openvpn/
+
+	
+	touch /etc/openvpn/update-resolv-conf
+cat <<EOF > /etc/openvpn/update-resolv-conf
+#!/bin/bash
+# 
+# Parses DHCP options from openvpn to update resolv.conf
+# To use set as 'up' and 'down' script in your openvpn *.conf:
+# up /etc/openvpn/update-resolv-conf
+# down /etc/openvpn/update-resolv-conf
+#
+# Used snippets of resolvconf script by Thomas Hood and Chris Hanson.
+# Licensed under the GNU GPL.  See /usr/share/common-licenses/GPL. 
+#
+foreign_option_1='dhcp-option DNS 209.222.18.222'
+foreign_option_2='dhcp-option DNS 209.222.18.218'
+foreign_option_3='dhcp-option DNS 8.8.8.8'
+
+[ -x /sbin/resolvconf ] || exit 0
+[ "\$script_type" ] || exit 0
+[ "\$dev" ] || exit 0
+
+split_into_parts()
+{
+	part1="\$1"
+	part2="\$2"
+	part3="\$3"
+}
+
+case "\$script_type" in
+  up)
+	NMSRVRS=""
+	SRCHS=""
+	for optionvarname in \${!foreign_option_*} ; do
+		option="\${!optionvarname}"
+		echo "\$option"
+		split_into_parts \$option
+		if [ "\$part1" = "dhcp-option" ] ; then
+			if [ "\$part2" = "DNS" ] ; then
+				NMSRVRS="\${NMSRVRS:+\$NMSRVRS }\$part3"
+			elif [ "\$part2" = "DOMAIN" ] ; then
+				SRCHS="\${SRCHS:+\$SRCHS }\$part3"
+			fi
+		fi
+	done
+	R=""
+	[ "\$SRCHS" ] && R="search \$SRCHS"
+	for NS in \$NMSRVRS ; do
+        	R="\${R}nameserver \$NS"
+	done
+	echo -n "\$R" | /sbin/resolvconf -a "\${dev}.openvpn"
+	;;
+  down)
+	/sbin/resolvconf -d "\${dev}.openvpn"
+	;;
+esac
+EOF
+	chmod +x /etc/openvpn/update-resolv-conf
+	
+	touch /etc/systemd/system/openvpn@openvpn.service	
+cat <<EOF > /etc/systemd/system/openvpn@openvpn.service
+[Unit]
+# HTPC Guides - www.htpcguides.com
+Description=OpenVPN connection to %i
+Documentation=man:openvpn(8)
+Documentation=https://community.openvpn.net/openvpn/wiki/Openvpn23ManPage
+Documentation=https://community.openvpn.net/openvpn/wiki/HOWTO
+After=network.target
+
+[Service]
+RuntimeDirectory=openvpn
+PrivateTmp=true
+KillMode=mixed
+Type=forking
+ExecStart=/usr/sbin/openvpn --daemon ovpn-%i --status /run/openvpn/%i.status 10 --cd /etc/openvpn --script-security 2 --config /etc/openvpn/%i.conf --writepid /run/openvpn/%i.pid
+PIDFile=/run/openvpn/%i.pid
+ExecReload=/bin/kill -HUP \$MAINPID
+WorkingDirectory=/etc/openvpn
+Restart=on-failure
+RestartSec=3
+ProtectSystem=yes
+LimitNPROC=10
+DeviceAllow=/dev/null rw
+DeviceAllow=/dev/net/tun rw
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+	touch /etc/openvpn/openvpn.conf
+cat <<EOF > /etc/openvpn/openvpn.conf
+client
+dev tun
+proto udp
+
+##
+## https://www.privateinternetaccess.com/helpdesk/kb/articles/which-encryption-auth-settings-should-i-use-for-ports-on-your-gateways-2
+## A list of portforwarding servers : https://www.privateinternetaccess.com/helpdesk/kb/articles/how-do-i-enable-port-forwarding-on-my-vpn
+## This setup is for 1198	UDP	AES-128-CBC	SHA1	ca.rsa.2048.crt	crl.rsa.2048.pem
+## Make sure is you change it that every thing changes in here as necessary
+## Use this one below for vpn without port forwarding ##
+## remote us-california.privateinternetaccess.com 1198
+## The one below for port forwarding ##
+##
+remote ca-toronto.privateinternetaccess.com 1198
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+cipher aes-128-cbc
+auth sha1
+tls-client
+remote-cert-tls server
+auth-user-pass /etc/openvpn/login.txt
+auth-nocache
+comp-lzo
+verb 1
+reneg-sec 0
+crl-verify /etc/openvpn/crl.rsa.2048.pem
+ca /etc/openvpn/ca.rsa.2048.crt
+disable-occ
+script-security 2
+route-noexec
+mute-replay-warnings
+
+#up and down scripts to be executed when VPN starts or stops
+up /etc/openvpn/iptables.sh
+down /etc/openvpn/update-resolv-conf
+EOF
+
+	touch /etc/openvpn/iptables.sh
+cat <<EOF > /etc/openvpn/iptables.sh
+#! /bin/bash
+# Niftiest Software – www.niftiestsoftware.com
+# Modified version by HTPC Guides – www.htpcguides.com
+
+export INTERFACE="tun0"
+export VPNUSER="$VPNUSER"
+export LOCALIP=\`ifconfig |grep "inet" |grep "cast"| awk '{print \$2}' |tr -dc '0-9.'\`
+export NETIF="$ETH"
+
+# flushes all the iptables rules, if you have other rules to use then add them into the script
+iptables -F -t nat
+iptables -F -t mangle
+iptables -F -t filter
+
+# mark packets from "$VPNUSER"
+iptables -t mangle -A OUTPUT -j CONNMARK --restore-mark
+iptables -t mangle -A OUTPUT ! --dest \$LOCALIP -m owner --uid-owner $VPNUSER -j MARK --set-mark 0x1
+iptables -t mangle -A OUTPUT --dest \$LOCALIP -p udp --dport 53 -m owner --uid-owner $VPNUSER -j MARK --set-mark 0x1
+iptables -t mangle -A OUTPUT --dest \$LOCALIP -p tcp --dport 53 -m owner --uid-owner $VPNUSER -j MARK --set-mark 0x1
+iptables -t mangle -A OUTPUT ! --src \$LOCALIP -j MARK --set-mark 0x1
+iptables -t mangle -A OUTPUT -j CONNMARK --save-mark
+
+# allow responses
+#iptables -A INPUT -i \$INTERFACE -m conntrack --ctstate ESTABLISHED -j ACCEPT
+# portforwarding changed line
+iptables -A INPUT -i \$INTERFACE -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+
+# block everything incoming on $INTERFACE to prevent accidental exposing of ports
+iptables -A INPUT -i \$INTERFACE -j REJECT
+
+# let $VPNUSER access lo and $INTERFACE
+iptables -A OUTPUT -o lo -m owner --uid-owner \$VPNUSER -j ACCEPT
+iptables -A OUTPUT -o \$INTERFACE -m owner --uid-owner \$VPNUSER -j ACCEPT
+
+# all packets on $INTERFACE needs to be masqueraded
+iptables -t nat -A POSTROUTING -o \$INTERFACE -j MASQUERADE
+
+# portforwarding exta line
+iptables -A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+
+# reject connections from predator IP going over $NETIF
+iptables -A OUTPUT ! --src \$LOCALIP -o \$NETIF -j REJECT
+
+# Start routing script
+/etc/openvpn/routing.sh
+
+exit 0
+EOF
+
+	chmod +x /etc/openvpn/iptables.sh
+	touch /etc/openvpn/routing.sh	
+cat <<EOF > /etc/openvpn/routing.sh
+#!/bin/bash
+# Niftiest Software – www.niftiestsoftware.com
+# Modified version by HTPC Guides – www.htpcguides.com
+
+VPNIF="tun0"
+VPNUSER="$VPNUSER"
+GATEWAYIP=\$(ifconfig \$VPNIF | egrep -o '([0-9]{1,3}\.){3}[0-9]{1,3}' | egrep -v '255|(127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})' | tail -n1)
+if [[ \`ip rule list | grep -c 0x1\` == 0 ]]; then
+	ip rule add from all fwmark 0x1 lookup \$VPNUSER
+fi
+ip route replace default via \$GATEWAYIP table \$VPNUSER
+ip route append default via 127.0.0.1 dev lo table \$VPNUSER
+ip route flush cache
+
+# run update-resolv-conf script to set VPN DNS
+/etc/openvpn/update-resolv-conf
+
+exit 0
+EOF
+	chmod +x /etc/openvpn/routing.sh
+	clear
+	echo "Create user $VPNUSER"
+	id -u "$VPNUSER" &>/dev/null || adduser --disabled-login "$VPNUSER"
+	usermod -aG "$VPNUSER" "$MYUSER"
+	usermod -aG "$MYUSER" "$VPNUSER"
+	
+	sudo mv "$EXPORTDIR""/PIA.txt" /etc/openvpn/login.txt
+	#touch /etc/openvpn/login.txt
+	## mv ~/.pia.txt /etc/openvpn/login.txt
+	#echo "$PIA_USERNAME" > /etc/openvpn/login.txt
+	#echo "$PIA_PASSWORD" >> /etc/openvpn/login.txt
+	sudo chmod 600 /etc/openvpn/login.txt
+	set +e
+	openvpn --version
+	set -e
+	if [ $? -eq 0 ]; then
+        touch "$PROGRESS"$1
+	fi
+	sleep 5
+	clear
+}
+
+do_modify_iptables() {
+	if [ -e "$PROGRESS"$1 ];then
+		return 0
+	fi
+	iptables -F
+	iptables -A OUTPUT ! -o lo -m owner --uid-owner "$VPNUSER" -j DROP
+
+	echo "During the following install, iptables-persistent will ask you to save current iptables rules to /etc/iptables/rules.v4, accept this with YES"
+	apt install iptables-persistent -y
+	#http://www.microhowto.info/howto/make_the_configuration_of_iptables_persistent_on_debian.html
+	
+touch /etc/sysctl.d/9999-vpn.conf
+cat <<EOF > /etc/sysctl.d/9999-vpn.conf
+net.ipv4.conf.all.rp_filter = 2
+net.ipv4.conf.default.rp_filter = 2
+net.ipv4.conf.$ETH.rp_filter = 2
+EOF
+
+cat <<EOF >> /etc/iproute2/rt_tables
+200     $VPNUSER
+EOF
+
+	sed -i '/^$/d' /etc/iproute2/rt_tables
+	if [ $? -eq 0 ]; then
+        touch "$PROGRESS"$1
+	fi
+	sleep 5
+	clear
+	echo "System will now reboot. ssh in again and restart script. This is normal."; sleep 10
+	reboot
+}
+
+do_activate_all() {
+	if [ -e "$PROGRESS"$1 ];then
+		return 0
+	fi
+	systemctl enable deluged.service
+	systemctl enable deluge-web.service
+	systemctl enable openvpn@openvpn.service
+	sysctl -p
+	sleep 10
+	systemctl start openvpn@openvpn.service
+	systemctl start deluged.service
+	systemctl start deluge-web.service	
+
+	echo "IP address of the normal user"
+	curl ipinfo.io
+	sleep 5
+	echo "IP address of the $VPNUSER user"
+	#sudo su --shell /bin/bash --login vpn
+	sudo -u "$VPNUSER" -i -- curl ipinfo.io
+	sleep 5
+
+	if [ $? -eq 0 ]; then
+        touch "$PROGRESS"$1
+	fi
+}
+
+do_install_rclone() {
+	if [ -e "$PROGRESS"$1 ];then
+		return 0
+	fi
+	[[ `uname -m` =~ "64" ]] && RCLONE="rclone-current-linux-amd64.zip"
+	[[ `uname -m` =~ "32" ]] && RCLONE="rclone-current-linux-386.zip"
+	[[ `uname -m` =~ "armv7l" ]] && RCLONE="rclone-current-linux-arm.zip"
+	[[ `uname -m` =~ "armv8" ]] && RCLONE="rclone-current-linux-arm64.zip"
+	
+	cd /tmp/
+	wget -N https://downloads.rclone.org/"$RCLONE"
+	unzip -jo "$RCLONE" -d rclone/
+	mv rclone/rclone /usr/bin/
+	cd
+
+	if [ $? -eq 0 ]; then
+        touch "$PROGRESS"$1
+	fi
+
+}
+
+if [ `id -u` != "0" ]; then
+        echo "Sorry, you are not root."
+        exit
+fi
+set -e
+do_admin
+do_proxy 0
+do_aptUpdate 1
+do_apt 2
+do_install_openvpn 3
+do_install_deluge 4
+do_modify_iptables 5
+do_activate_all 6
+do_stuff 7
+do_install_rclone 8
+clear
+echo "done..."
+cat <<EOF
+Type the following:
+
+sudo su --shell /bin/bash --login $VPNUSER
+
+enter password of root user and then type
+
+rclone config
+
+and folow the instructions
+EOF
+
+	echo "Stopping deluged & deluge-web services"
+	systemctl stop deluged.service /
+	systemctl stop deluge-web.service	
+1
+2
+3
+4
+5
