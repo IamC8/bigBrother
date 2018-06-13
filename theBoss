@@ -16,11 +16,10 @@ do_admin() {
 	EXPORTDIR="$HOMEDIR""/exports"
 	TORROOT="$HOMEDIR""/torrents"
 	mkdir -p "$SCRIPTDIR" "$EXPORTDIR" "$TORROOT"
-	
-	#touch "$EXPORTDIR""/PIA.txt"
+	CURDIR=`pwd`
 	
 	clear
-	if [ ! -e "$EXPORTDIR""/PIA.txt" ] && [ ! -e "/etc/openvpn/login.txt" ];then
+	if [ ! -e "$EXPORTDIR""/PIA.txt" ] && [ ! -e "/etc/openvpn/login.txt" ] && [ ! -e "$CURDIR/PIA.txt" ];then
 		HAPPY="n"
 		while [[ ! $HAPPY =~ ^[Yy]$ ]]  
 		do
@@ -31,10 +30,7 @@ do_admin() {
 			echo "You entered u:$PIA_USERNAME p:$PIA_PASSWORD"
 			read -p "Are you happy with these? " HAPPY
 		done
-## Delete
-		PIA_USERNAME="username"
-		PIA_PASSWORD="password"
-##
+
 		echo "$PIA_USERNAME" > "$EXPORTDIR""/PIA.txt"
 		echo "$PIA_PASSWORD" >> "$EXPORTDIR""/PIA.txt"
 		sudo chmod 600 "$EXPORTDIR""/PIA.txt"
@@ -56,9 +52,6 @@ do_admin() {
 	chmod 444 "$EXPORTDIR""/VPNUSER"
 	VPNUSER=`cat "$EXPORTDIR""/VPNUSER"`
 	
-## Delete	
-	VPNUSER="ispy" ## lowercase
-##
 	chown -R "#VPNUSER":"$VPNUSER" "$TORROOT"
 	chmod -R 777 "$TORROOT"
 	fi
@@ -468,10 +461,6 @@ EOF
 	usermod -aG "$MYUSER" "$VPNUSER"
 	
 	sudo mv "$EXPORTDIR""/PIA.txt" /etc/openvpn/login.txt
-	#touch /etc/openvpn/login.txt
-	## mv ~/.pia.txt /etc/openvpn/login.txt
-	#echo "$PIA_USERNAME" > /etc/openvpn/login.txt
-	#echo "$PIA_PASSWORD" >> /etc/openvpn/login.txt
 	sudo chmod 600 /etc/openvpn/login.txt
 	set +e
 	openvpn --version
@@ -593,9 +582,4 @@ EOF
 
 	echo "Stopping deluged & deluge-web services"
 	systemctl stop deluged.service /
-	systemctl stop deluge-web.service	
-1
-2
-3
-4
-5
+	systemctl stop deluge-web.service
