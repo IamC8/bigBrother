@@ -50,3 +50,12 @@ A newly installed version of one of the following
 * Read here to change deluge's password: 
 * [Deluge ThinClient] (https://dev.deluge-torrent.org/wiki/UserGuide/ThinClient)
 
+## Acknowledgments
+
+* Hat tip to anyone whose code and info was used and changed.
+* https://www.htpcguides.com/force-torrent-traffic-vpn-split-tunnel-debian-8-ubuntu-16-04/
+* http://dev.deluge-torrent.org/wiki/UserGuide/ThinClient
+* https://openvpn.net/
+* http://dev.deluge-torrent.org/wiki/Download
+* https://rclone.org/drive/
+* https://docs.pushbullet.com/
