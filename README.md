@@ -21,24 +21,22 @@ A newly installed version of one of the following
 * [Ubuntu 18.04 LTS Minimal] (https://help.ubuntu.com/community/Installation/MinimalCD) - Tested as standalone and on virtualbox.
 
 ### Installing
-When you have the seedbox up and runnig, ssh into it and download the scripts.
-Extract  the files with tar.
-  chmod +x theBoss
-  populate the config file with your own info
-  sudo ./theBoss
+*When you have the seedbox up and runnig, ssh into it and download the scripts.
+*Extract  the files with tar.
+*  chmod +x theBoss
+*  populate the config file with your own info
+*  sudo ./theBoss
   
-Follow the instructions and ssh into the box again when a reboot occurred.
-Re-run the script again.
-And repeat
+*Follow the instructions and ssh into the box again when a reboot occurred.
+*Re-run the script again.
+*And repeat
+*until finished
 
-```
-until finished
-```
 ## Checking if al went well
 * Whilst logged in via ssh type the following:
 *   sudo su --shell /bin/bash --login vpn_user
 * Then type:
-*   ssh -fNL 58888:localhost:58846 USER@$OSTNAME
+*   ssh -fNL 58888:localhost:58846 USER@HOSTNAME
 * Accept the fingerprint and enter password.
 * When all is good, press CTRL D twice to get out of box.
 * Then from you own machine type:
