@@ -22,9 +22,9 @@ A newly installed version of one of the following
 
 ### Installing
 * When you have the seedbox up and runnig, ssh into it and download the scripts.
-* Extract  the files with tar.
+* Extract the files.
 * chmod +x theBoss
-* populate the config file with your own info
+* populate the config file with your own info.
 * sudo ./theBoss
   
 * Follow the instructions and ssh into the box again when a reboot occurred.
