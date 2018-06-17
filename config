@@ -1,0 +1,47 @@
+### Select Modules to include
+pushbullet=1
+deluge_web=0
+rclone=1
+
+## Not functionsl yet
+rtorrent=0 
+deluge=1
+
+#PrivateInternetAccess:
+pia_user=""
+pia_pass=""
+
+#VPN user name:
+vpn_user="thespy"
+
+#Deluge username and password
+deluge_user="alice"
+deluge_pass="MyC0mpL3xPass"
+
+#PushBullet:
+client_iden=""
+channel_tag=""
+
+#rclone finished with setup:
+rclone_fin=0
+
+#Torrent directories
+root_torrent_dir="/data/torrents"
+busy_torrent_dir="/downloading"
+used_torrent_dir="/used_torrents"
+watching_torrent_dir="/watch"
+completed_torrent_dir="/completed"
+## Change this to array
+completed_torrent_subdir1="/public"
+completed_torrent_subdir2="/iptorrents"
+completed_torrent_subdir3="/myanonamouse"
+
+### Optional private torrent logins
+mam_account=1
+mam_username=""
+mam_password=""
+
+### Optional use proxy during install
+### If you activate this make sure the do_proxy() sub in theBoss is according to your setup
+proxy=1
+

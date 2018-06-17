@@ -1,0 +1,246 @@
+#!/bin/bash
+
+export TERM=${TERM:-dumb}
+exec 1> >(logger -s -t $(basename $0)) 2>&1
+#Dont delete these hashes
+#Dont delete these hashes
+#Dont delete these hashes
+#Dont delete these hashes
+chkUSR() {
+	if [ "$(whoami)" != "$1" ]; then
+			echo "ERROR. Sub should have been run as user: $1"
+			exit 2
+	fi
+	if [ "$(whoami)" == "root" ]; then
+			chmod -R 777 "$EXPORTDIR"
+	fi
+}
+
+resNET() {
+	chkUSR root
+	echo "$(date +"%F %T") Reset script starting"
+	[[ $deluge_web -eq 1 ]] && systemctl stop deluge-web.service
+	[[ $deluge -eq 1 ]] && systemctl stop deluged.service
+
+	echo "$(date +"%F %T") deluge stopped"
+	systemctl stop openvpn@openvpn.service
+	echo "$(date +"%F %T") openvpn stopped"
+	echo "$(date +"%F %T") restarting network"
+## Todo test on raspberri pi. Might need: service network stop
+	systemctl stop systemd-networkd
+	sleep 10
+	systemctl start systemd-networkd
+	echo "$(date +"%F %T") restarting services"
+	systemctl start openvpn@openvpn.service
+	[[ $deluge -eq 1 ]] && systemctl start deluged.service
+	[[ $deluge_web -eq 1 ]] && systemctl start deluge-web.service
+	echo "$(date +"%F %T") script completed"
+	exit 0
+}
+
+chnIPT() {
+	chkUSR root
+## Todo test if next line can come out
+	PATH=/usr/sbin:/sbin:/usr/bin:/bin
+	
+	if [ ! -f "$PORTFILE" ]; then 
+	echo "PORTFILE missing"
+	exit 1
+	fi
+	PORT=`cat "$PORTFILE"`
+	IPTABLERULETWO=$(iptables -L INPUT -n --line-numbers | grep -E "2.*reject-with icmp-port-unreachable" | awk '{ print $8 }')
+	if [ ! -z $PORT ];then
+		IPTABLERULETHREE=$(iptables -L INPUT -n --line-numbers | grep -E "2.*tcp dpt:$PORT" | awk '{ print $8 }'| sed -e 's/dpt://')
+		if [ -z $IPTABLERULETHREE ]; then
+			IPTABLERULETHREE="99999999"
+		fi
+		if [ $IPTABLERULETHREE -eq $PORT ];then
+			echo "No change needed in iptables"
+			exit 0
+		fi
+	fi
+		if [ -z $IPTABLERULETWO ]; then
+			echo "Delete old Port in iptables"
+			iptables -D INPUT 2
+			if [ ! -z $PORT ];then
+				echo "Inserting a new rule into iptables at position 2"
+				iptables -I INPUT 2 -i $VPNINTERFACE -p tcp --dport $PORT -j ACCEPT
+			else
+				echo "ERROR"
+				echo "No new port spesified!"
+				echo "Port Forwarding will NOT work!"
+				resNET
+			fi
+		else
+				if [ ! -z $PORT ];then
+					echo "Inserting a new rule into iptables at position 2"
+					iptables -I INPUT 2 -i $VPNINTERFACE -p tcp --dport $PORT -j ACCEPT
+				else
+					echo "No new port spesified!"
+				fi
+		fi
+	exit 0
+}
+
+chkVPN() {
+	chkUSR root
+	PBLOG="/tmp/theAccountant.pb.log"
+	inetRes=`nmap -vv -p 53 -Pn 8.8.8.8 |grep Discovered |sed -e 's/port.*//'`
+	if [ "$inetRes" != "Discovered open " ]; then
+			echo "$(date +"%F %T") No internet available. Trying to restart network and services."
+			resNET
+			exit 1
+	fi
+
+	VPNIP=`sudo -u "$vpn_user" -i -- curl --connect-timeout 10 -s ipinfo.io |grep -A 0 -B0 ip|head -n1| sed 's|[^0-9.]||g'`
+	if [[ "$VPNIP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]];then
+		echo "$(date +"%F %T") VPN Connection looks good."
+		echo "$VPNIP" > "$EXPORTDIR""/VPNIP"
+	else
+	if [[ $pushbullet -eq 1 ]] ;then
+		wanip=$(curl -s ipinfo.io/ip)
+		curl -s -o "$PBLOG" \
+		https://api.pushbullet.com/v2/pushes \
+		-u "$client_iden" \
+		-d channel_tag="$channel_tag" \
+		-d type="note" \
+		-d title="Resetting VPN on testBOX" \
+		-d body="Current pub IP: $wanip" \
+		-X POST
+	fi
+	resNET
+	fi
+	exit 0
+}
+
+getNFP() {
+	chkUSR "$vpn_user"
+	if [ -e /run/openvpn/openvpn.pid ];then
+		echo "OpenVPN is running."
+		OVPN_CUR_PID=`cat /run/openvpn/openvpn.pid`
+		if [ ! -e "$EXPORTDIR/OVPN_OLD_PID" ];then
+			echo "$OVPN_CUR_PID" > "$EXPORTDIR/OVPN_OLD_PID"
+		else
+			OVPN_OLD_PID=`cat "$EXPORTDIR/OVPN_OLD_PID"`
+			if [ "$OVPN_OLD_PID" -ne "$OVPN_CUR_PID" ] || [ ! -e "$EXPORTDIR/PORTF" ];then
+				echo "$OVPN_CUR_PID" > "$EXPORTDIR/OVPN_OLD_PID"
+				echo "Getting the new forwarded port."
+				client_id=`head -n 100 /dev/urandom | sha256sum | tr -d " -"`
+				sleep 10
+				RES=`curl -s -m 15 "http://209.222.18.222:2000/?client_id=$client_id"`
+				echo "$RES" > "$EXPORTDIR/PORTF_RAW"
+				setNFP
+				sleep 10
+				conMAM
+			else
+			echo "PID of OpenVPN did not change."
+			fi
+		fi
+	else
+		echo "Wait for OpenVPN to start..."
+	fi
+	exit 0
+}
+
+popDWF() {
+	[[ $rclone_fin -eq 0 ]] && exit 0
+	chkUSR "$vpn_user"
+	echo "rclone started."
+	rclone move seedbox:watch "$root_torrent_dir$watching_torrent_dir" --delete-after
+	echo "rclone finished."
+	exit 0
+}
+
+test12() {
+	chkUSR "$(whoami)"
+	echo "Testing Good."
+	echo "Sub Finished."
+	exit 0
+}
+
+conMAM() {
+[[ $mam_account -eq 1 ]] && exit 0
+	echo "Login to MaM"
+	# Log into the server.
+	wget \
+	--save-cookies cookies.txt \
+	--keep-session-cookies \
+	--post-data="email=$mam_username&password=$mam_password" \
+	--no-check-certificate \
+	--output-document="res.html" \
+	https://www.myanonamouse.net/takelogin.php
+
+	sleep 20
+	# Log out from the server.
+## Todo change to wget
+	curl -s \
+	-b cookies.txt \
+	"https://www.myanonamouse.net/logout.php"
+}
+
+setNFP() {
+	cat "$EXPORTDIR/PORTF_RAW" |grep port | sed -e 's/[^0-9]*//g' > "$EXPORTDIR/PORTF"
+	PORT=`cat "$EXPORTDIR/PORTF"`
+
+	if [[ $PORT =~ ^-?[0-9]+$ ]];then
+		VPNIP=`curl --connect-timeout 10 -s ipinfo.io |grep -A 0 -B0 ip|head -n1| sed 's/[^0-9.]//g'`
+		if [[ "$VPNIP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]];then
+			echo "Updating torrent client forwarded port: $PORT"
+			[[ $deluge -eq 1 ]] && deluge-console "config --set listen_ports ($PORT,$PORT)"
+			if [[ $rtorrent -eq 1 ]];then
+				/bin/kill -s SIGTERM $(pidof rtorrent) > /dev/null 2>&1
+				/usr/bin/killall screen > /dev/null 2>&1
+				sleep 5
+				screen -dmfa -S rt rtorrent -p $PORT-$PORT -i $VPNIP
+			fi
+			echo "$VPNIP" >"$EXPORTDIR/VPNIP"
+		fi
+	else
+		echo "ERROR with getting PORTF."
+	fi
+}
+
+if [ $# -ne 1 ]
+then
+        echo "Usage : $0 option subroutine"
+        exit
+fi
+
+MYUSER=`awk -F'[/:]' '{if ($3 >= 1000 && $3 != 65534) print $1}' /etc/passwd  |head -n1`
+HOMEDIR=$( getent passwd "$MYUSER" | cut -d: -f6 )
+EXPORTDIR="$HOMEDIR""/exports"
+SCRIPTFOLDER="$HOMEDIR/scripts"
+if test -f ${SCRIPTFOLDER}/config ; then
+  . ${SCRIPTFOLDER}/config
+else
+	echo "ERROR. The config file is missing";exit 1
+fi
+
+VPNINTERFACE="tun0"
+PORTFILE="$EXPORTDIR/PORTF"
+
+case "$1" in
+resNET) 	echo "Resetting Network and Stopping VPN Services."
+			resNET
+			;;
+chnIPT) 	echo "Checking IP Tables."
+			chnIPT
+			;;
+chkVPN) 	echo "Checking if VPN is OK."
+			chkVPN
+			;;
+getNFP) 	echo "Checking for new Forwarded Port."
+			getNFP
+			;;
+popDWF) 	echo "Populate Deluge Watch Folder."
+			popDWF
+			;;
+test12) 	echo "Testing theAccountant."
+			test12
+			;;
+*) 			echo "Invalid option."
+			exit 1
+			;;
+esac
+
+
